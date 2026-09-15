@@ -223,4 +223,10 @@ tests/test_coro.c + .expected C-тест (любой бэкенд)
 tools/qemu-e2k-user-hwstacks.patch
 tools/build-toolchain.sh, tools/Dockerfile   воспроизводимый стенд
 REVIEW.md                 отчёт ревьюера по исходному решению и его доработке
+LICENSE                   MIT
 ```
+
+## Лицензия
+
+MIT — см. `LICENSE`. Патч в `tools/` относится к qemu (GPL‑2.0) и распространяется
+на его условиях.
