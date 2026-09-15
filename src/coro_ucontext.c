@@ -15,8 +15,12 @@
 
 #if defined(__e2k__)
 /* e2k glibc: освобождение аппаратных стеков, выделенных makecontext.
- * Слабая ссылка: при отсутствии символа вызов пропускается. */
+ * Имя функции в разных источниках — freecontext или freecontext_e2k
+ * (документация MCST, гл. 3.2); слабые ссылки на оба, при отсутствии
+ * символов вызов пропускается (тогда coro_destroy оставит утечку в ядре —
+ * см. README, «Ограничения»). */
 extern int freecontext(ucontext_t *ucp) __attribute__((weak));
+extern int freecontext_e2k(ucontext_t *ucp) __attribute__((weak));
 #endif
 
 #define CORO_FLAG_STARTED	0x2u
@@ -91,7 +95,9 @@ void coro_destroy(coro_ctx_t *ctx)
 	if ((ctx->attr_flags & CORO_ATTR_GUARD) && ctx->guard)
 		mprotect(ctx->area, ctx->guard, PROT_READ | PROT_WRITE);
 #if defined(__e2k__)
-	if (freecontext)
+	if (freecontext_e2k)
+		freecontext_e2k(&ctx->uc);
+	else if (freecontext)
 		freecontext(&ctx->uc);
 #endif
 	ctx->entry = 0;
