@@ -100,15 +100,37 @@ docker run --rm -v "$PWD":/src -w /src coro-e2k-lab make check
 регистрами и кадрами на каждом уровне; геометрия стека данных (SP на вершине,
 кадр `getsp −N` внутри области); отказы `coro_init`.
 
-### На e2k‑машине с lcc
+### На e2k‑машине (железо, lcc + native binutils)
+
+Тулчейн: `lcc` (препроцессор и компилятор C), native `as`/`ld` из
+binutils MCST; `cpp` берётся из lcc. Стенд с qemu не нужен.
+
+**UCONTEXT — пользовательский код (это и есть штатный режим на железе):**
 
 ```bash
-# DIRECT (привилегированный код / qemu):
-lcc -c src/coro_e2k.S -Isrc
-# UCONTEXT (user-space):
-lcc -O2 -DCORO_BACKEND_UCONTEXT -Iinclude -c src/coro_ucontext.c
-lcc -O2 -DCORO_BACKEND_UCONTEXT -Iinclude tests/test_coro.c src/coro_ucontext.c -o test_coro
+make CC=lcc check-host
 ```
+
+Цель собирает `tests/test_coro.c` + `src/coro_ucontext.c` с
+`-DCORO_BACKEND_UCONTEXT`, запускает и сверяет вывод с
+`tests/test_coro.expected`; ожидаемый итог — `PASS test_coro (ucontext, host)`.
+Подключение в проект: `lcc -O2 -DCORO_BACKEND_UCONTEXT -Iinclude -c src/coro_ucontext.c`.
+
+**DIRECT — только привилегированный код.** Библиотека и ассемблерные тесты
+собираются native‑тулчейном:
+
+```bash
+make E2K_PREFIX= CPP='lcc -E' all                       # build/emu/coro_e2k.o
+make E2K_PREFIX= CPP='lcc -E' build/emu/test_basic      # тестовые бинарники
+```
+
+Запускать `build/emu/test_*` в user‑space на железе **нельзя**: первый же
+`rwd %psp.hi` — привилегированное действие, процесс получит SIGILL
+(ровно то, что показывает qemu без патча). Прогон DIRECT‑тестов на железе
+возможен только из привилегированного окружения (модуль ядра, гипервизор,
+bare‑metal), куда переносится `src/coro_e2k.S` и логика тестов; такой
+стенд в репозитории не предусмотрен. Полный `make check` на железе поэтому
+не применим — используйте `check-host`.
 
 ## Патч qemu
 
