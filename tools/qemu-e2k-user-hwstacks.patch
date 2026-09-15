@@ -1,0 +1,32 @@
+Allow user-mode writes to hardware stack registers in linux-user emulation
+
+PSP/PCSP/USD/SBR are privileged on real hardware: user-space context
+switching goes through the kernel (e2k makecontext/swapcontext syscalls),
+which qemu-e2k linux-user does not implement (do_swapcontext is a TODO).
+Permit the writes in linux-user so the DIRECT coroutine backend can act
+as that missing kernel support. Reads were already unprivileged here.
+
+Applies to OpenE2K/qemu-e2k, branch e2k, commit ebc4bbd.
+
+diff --git a/target/e2k/helper_int.c b/target/e2k/helper_int.c
+index ff474a0..e7a2acb 100644
+--- a/target/e2k/helper_int.c
++++ b/target/e2k/helper_int.c
+@@ -243,6 +243,17 @@ void HELPER(state_reg_set)(CPUE2KState *env, uint64_t value, int index)
+     case SR_CUIR:
+         raise_exception(env, E2K_EXCP_ILLEGAL_OPCODE); /* FIXME */
+         break;
++    case SR_PSP_HI:
++    case SR_PSP_LO:
++    case SR_PCSP_HI:
++    case SR_PCSP_LO:
++    case SR_USD_HI:
++    case SR_USD_LO:
++    case SR_SBR:
++        /* Allow user-mode context switching (coroutines, swapcontext):
++         * reads of these registers are already unprivileged, so permit
++         * writes as well in linux-user emulation. */
++        break;
+     default:
+         if ((env->psr & PSR_PM) == 0) {
+             raise_exception(env, E2K_EXCP_PRIV_ACTION);

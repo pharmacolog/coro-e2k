@@ -1,0 +1,25 @@
+main: start
+worker 1: step 0
+worker 2: step 0
+worker 1: step 1
+worker 2: step 1
+worker 1: step 2
+worker 2: step 2
+both finished
+resume finished ok
+stress: ok
+level2 in
+main: got
+level2 back
+level1 ok
+level0 ok
+level2 in
+main: got
+level2 back
+level1 ok
+level0 ok
+main: got
+nested: ok
+entry ran
+init errors: ok
+all ok
