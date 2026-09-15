@@ -1,0 +1,37 @@
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # Бэкенд UCONTEXT: C-тест на хосте (Linux — страница 4 КиБ, SIGSEGV;
+  # macOS/arm64 — страница 16 КиБ, SIGBUS на guard).
+  host:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: make check-host
+
+  # Бэкенд DIRECT: стенд из tools/Dockerfile (binutils MCST + qemu-e2k с
+  # патчем), затем полный make check внутри. Образ кешируется по содержимому
+  # tools/, повторные прогоны не пересобирают тулчейн.
+  emu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: tools/Dockerfile
+          tags: coro-e2k-lab:ci
+          load: true
+          cache-from: type=gha,scope=toolchain-${{ hashFiles('tools/Dockerfile', 'tools/build-toolchain.sh', 'tools/qemu-e2k-user-hwstacks.patch') }}
+          cache-to: type=gha,mode=max,scope=toolchain-${{ hashFiles('tools/Dockerfile', 'tools/build-toolchain.sh', 'tools/qemu-e2k-user-hwstacks.patch') }}
+      - run: docker run --rm -v "$PWD":/src -w /src coro-e2k-lab:ci make check

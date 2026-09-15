@@ -1,5 +1,7 @@
 # coro-e2k — стековые корутины для архитектуры e2k («Эльбрус»)
 
+[![check](https://github.com/pharmacolog/coro-e2k/actions/workflows/check.yml/badge.svg)](https://github.com/pharmacolog/coro-e2k/actions/workflows/check.yml)
+
 Симметричные кооперативные корутины (`coro_transfer(from, to)`) в духе
 `transfer_*` из iris/boost.context, но для e2k с её регистровыми окнами и
 тремя аппаратными стеками: стеком данных (USD/USBR), стеком процедур (PS,
@@ -120,6 +122,9 @@ docker run --rm -v "$PWD":/src -w /src coro-e2k-lab make check
 * `check-host` — UCONTEXT: `tests/test_coro.c` + `src/coro_ucontext.c` на
   хосте (Linux, macOS, …) — те же сценарии, что и в ассемблерных тестах.
 * `check` — обе.
+
+CI (`.github/workflows/check.yml`): `check-host` на Ubuntu и macOS, `check`
+целиком — в стенде из `tools/Dockerfile` (образ кешируется по содержимому `tools/`).
 
 Сценарии тестов: базовое чередование двух корутин с состоянием в регистровом
 окне и кадром на собственном стеке; завершение (`entry` вернулась → `ret_ctx`,
