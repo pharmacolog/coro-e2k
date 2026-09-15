@@ -83,13 +83,20 @@ linux‑user их не реализует (`do_swapcontext: TODO`). Разреш
 * C‑API `include/coro.h`; второй бэкенд `src/coro_ucontext.c` для
   user‑space на железе.
 * Патч qemu сведён к `helper_int.c`.
+* Вторая итерация: `coro_init_ex` с атрибутами (размеры PS/PCS,
+  guard‑страницы `PROT_NONE` через `mprotect` под стеком данных и над PS/PCS;
+  в UCONTEXT — под стеком, размер guard = страница ОС), `coro_destroy`
+  (снимает guard, инвалидирует ctx, на e2k/UCONTEXT — `freecontext`).
 
 ## 6. Верификация доработанного решения
 
-DIRECT под qemu‑B (только `helper_int.c`): 6 тестов PASS —
+DIRECT под qemu‑B (только `helper_int.c`): 8 тестов PASS —
 `basic`, `finish`, `stress` (100 000 раундов × 2, кадр проверяется через yield;
 0,1 с), `nested` (yield из глубины 3 с живыми регистрами и кадрами на каждом
-уровне), `frame` (SP на вершине, кадр 2 КиБ внутри области), `init_errors`.
+уровне), `frame` (SP на вершине, кадр 2 КиБ внутри области), `init_errors`,
+`attrs` (геометрия с заданными размерами, рекурсия 200 уровней при PCS 8 КиБ,
+`coro_destroy` снимает guard), `guard_fault` (запись в guard — SIGSEGV,
+exit 139; контрольная мутация без флага — процесс выживает).
 Под qemu‑A — тот же результат; под qemu‑C — SIGILL, ожидаемо.
 UCONTEXT: `tests/test_coro.c` — те же сценарии — PASS на Linux/arm64 и macOS.
 Проверка умеет падать: при порче `.expected` `make check` возвращает ошибку;
@@ -108,5 +115,6 @@ UCONTEXT: `tests/test_coro.c` — те же сценарии — PASS на Linux
   `tests/test_coro.c`.
 * Единого бинарника для эмулятора и user‑space железа не существует по
   устройству архитектуры; выбор бэкенда — на этапе сборки.
-* Размеры PS/PCS фиксированы константами; нет guard‑страниц; не сохраняются
-  FP‑состояние сверх того, что уносят chain‑записи, и `%g`‑регистры.
+* Не сохраняются FP‑состояние сверх того, что уносят chain‑записи, и
+  `%g`‑регистры. Guard‑страницы требуют ОС с `mprotect`: в привилегированном
+  окружении на железе флаг `CORO_ATTR_GUARD` неприменим.

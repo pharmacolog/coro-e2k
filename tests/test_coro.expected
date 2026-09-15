@@ -22,4 +22,10 @@ main: got
 nested: ok
 entry ran
 init errors: ok
+depth: ok
+destroy: ok
+before fault
+guard: ok
+worker 1: step 0
+attrs: ok
 all ok

@@ -21,15 +21,32 @@ DIRECT‑бэкенд в эмуляторе играет роль отсутст
 ## API (`include/coro.h`)
 
 ```c
+typedef struct coro_attr { uint64_t ps_size, pcs_size, flags; } coro_attr_t;
+
+int  coro_init_ex(coro_ctx_t *ctx, void *area, size_t size,
+                  void (*entry)(void *), void *arg, coro_ctx_t *ret_ctx,
+                  const coro_attr_t *attr);
 int  coro_init(coro_ctx_t *ctx, void *area, size_t size,
-               void (*entry)(void *), void *arg, coro_ctx_t *ret_ctx);
+               void (*entry)(void *), void *arg, coro_ctx_t *ret_ctx);  /* attr = NULL */
 void coro_transfer(coro_ctx_t *from, coro_ctx_t *to);
 int  coro_finished(const coro_ctx_t *ctx);
+void coro_destroy(coro_ctx_t *ctx);
 ```
 
-* `coro_init` готовит корутину в области `area` размера `size`
-  (`area` выровнена на `CORO_AREA_ALIGN`, `size` кратен ему и не меньше
-  `CORO_MIN_AREA`); возвращает 0 или −1 при некорректных аргументах.
+* `coro_init_ex` готовит корутину в области `area` размера `size`
+  (`area` выровнена на `CORO_AREA_ALIGN`, `size` кратен ему и достаточен
+  для стеков); возвращает 0 или −1 при некорректных аргументах,
+  недостаточном размере или ошибке `mprotect`. `attr` (нулевое поле —
+  умолчание): `ps_size`/`pcs_size` — размеры стека процедур и стека цепочек
+  (DIRECT; кратны 4 КиБ; по умолчанию 16 КиБ и 4 КиБ ≈ 128 вложенных
+  вызовов), `flags = CORO_ATTR_GUARD` — guard‑страницы `PROT_NONE` через
+  `mprotect`: под стеком данных и над PS и PCS (DIRECT), под стеком
+  (UCONTEXT). С guard `area` выравнивается на страницу ОС.
+* `coro_destroy` снимает guard‑страницы (область можно освободить или
+  переиспользовать) и делает `ctx` непригодным для `coro_transfer`;
+  допустимо для незавершённой корутины (её стеки просто бросаются). На e2k в
+  UCONTEXT дополнительно зовёт `freecontext` (слабая ссылка). Не вызывать
+  из самой корутины.
 * Первый `coro_transfer(x, ctx)` запускает `entry(arg)` на стеке корутины по
   штатному ABI (аргумент в `%r0`). Когда `entry` возвращается, корутина
   помечается завершённой, управление уходит в `ret_ctx`; повторный
@@ -42,14 +59,18 @@ int  coro_finished(const coro_ctx_t *ctx);
 
 ## Как устроен DIRECT‑бэкенд
 
-Раскладка `area` (`src/coro_layout.h`, всё кратно 4 КиБ):
+Раскладка `area` (`src/coro_layout.h`, всё кратно 4 КиБ; `[G]` — guard‑страницы
+только при `CORO_ATTR_GUARD`), снизу вверх:
 
 ```
-area                         стек данных, растёт ВНИЗ от sbr;
-                             верхние 32 байта — указатель own_ctx
-area + data_sz  (= sbr)      стек процедур PS, CORO_PS_SIZE  (16 КиБ)
-        + CORO_PS_SIZE       стек цепочек PCS, CORO_PCS_SIZE (4 КиБ ≈ 128 вложенных вызовов)
-data_sz = size − CORO_PS_SIZE − CORO_PCS_SIZE  (≥ 4 КиБ)
+area        [G]              guard под стеком данных
+            data_sz          стек данных, растёт ВНИЗ от sbr; верхние 32 байта — own_ctx
+sbr         ps_size          стек процедур PS, растёт вверх
+            [G]
+            pcs_size         стек цепочек PCS, растёт вверх
+            [G]
+area + size
+data_sz = size − ps_size − pcs_size − 3·G  (≥ 4 КиБ)
 ```
 
 `coro_transfer`: `setwd` до архитектурного максимума (окно вызывающего
@@ -68,10 +89,11 @@ data_sz = size − CORO_PS_SIZE − CORO_PCS_SIZE  (≥ 4 КиБ)
 `entry(arg)` косвенным `movtd`→`%ctpr1`+`call`, а по возврате выставляет
 флаг и уходит в `ret_ctx`.
 
-Переполнение PS/PCS: на железе — исключение по границе стека; в qemu
+Переполнение PS/PCS: с guard‑страницами — SIGSEGV на первой записи за
+границу; без них на железе — исключение по границе стека, а в qemu
 linux‑user эмулятор попытается «расширить» стек через `stack_expand`, что
-для наших областей означает переезд, — задавайте `CORO_PS_SIZE`/`CORO_PCS_SIZE`
-по ожидаемой глубине вызовов.
+для наших областей означает переезд. Задавайте `ps_size`/`pcs_size` по
+ожидаемой глубине вызовов (32 байта PCS на вызов; PS — по размерам окон).
 
 ## Сборка и проверка
 
@@ -86,9 +108,10 @@ docker run --rm -v "$PWD":/src -w /src coro-e2k-lab make check
 
 Цели `make`:
 
-* `check-emu` — DIRECT: собирает `src/coro_e2k.S` и шесть ассемблерных тестов
+* `check-emu` — DIRECT: собирает `src/coro_e2k.S` и восемь ассемблерных тестов
   (`tests/test_*.S`), гоняет под `qemu-e2k`, сверяет вывод с
-  `tests/*.expected` и код возврата. Переменные: `E2K_PREFIX`, `QEMU_E2K`, `CPP`.
+  `tests/*.expected` и код возврата (`tests/*.exitcode`, по умолчанию 0).
+  Переменные: `E2K_PREFIX`, `QEMU_E2K`, `CPP`.
 * `check-host` — UCONTEXT: `tests/test_coro.c` + `src/coro_ucontext.c` на
   хосте (Linux, macOS, …) — те же сценарии, что и в ассемблерных тестах.
 * `check` — обе.
@@ -98,7 +121,10 @@ docker run --rm -v "$PWD":/src -w /src coro-e2k-lab make check
 флаг, повторное возобновление завершённой); стресс 100 000 раундов × 2 корутины
 с проверкой кадра через yield; yield из глубины трёх вложенных процедур с живыми
 регистрами и кадрами на каждом уровне; геометрия стека данных (SP на вершине,
-кадр `getsp −N` внутри области); отказы `coro_init`.
+кадр `getsp −N` внутри области); отказы `coro_init`; атрибуты
+(`ps_size`/`pcs_size`, рекурсия глубиной 200 при PCS 8 КиБ, `coro_destroy`
+снимает guard); guard‑страница действительно защищена (ожидаемый SIGSEGV,
+exit 139).
 
 ### На e2k‑машине (железо, lcc + native binutils)
 
@@ -143,9 +169,9 @@ PSP/PCSP/USD/USBR (чтение там и так непривилегирова�
 
 | Что | Где | Результат |
 |---|---|---|
-| DIRECT, 6 тестов | qemu‑e2k + патч (Linux/arm64, Docker) | PASS; 400 000 переключений за 0,1 с |
-| DIRECT, 6 тестов | qemu‑e2k без патча | SIGILL на первом `rwd %psp.hi` — ожидаемо |
-| UCONTEXT, C‑тест | Linux/arm64 glibc, macOS | PASS |
+| DIRECT, 8 тестов | qemu‑e2k + патч (Linux/arm64, Docker) | PASS; 400 000 переключений за 0,1 с |
+| DIRECT, 8 тестов | qemu‑e2k без патча | SIGILL на первом `rwd %psp.hi` — ожидаемо |
+| UCONTEXT, C‑тест | Linux/arm64 glibc, macOS (страница 16 КиБ, SIGBUS на guard) | PASS |
 | DIRECT на железе (привилегированный режим) | — | **не проверялось**: нет доступа к машине |
 | UCONTEXT на железе (glibc e2k, lcc) | — | **не проверялось**; путь штатный для glibc |
 
@@ -158,10 +184,10 @@ PSP/PCSP/USD/USBR (чтение там и так непривилегирова�
 
 ```
 include/coro.h            API (оба бэкенда)
-src/coro_e2k.S            DIRECT: coro_transfer / coro_init / coro_finished / трамплин
+src/coro_e2k.S            DIRECT: coro_transfer / coro_init(_ex) / coro_destroy / coro_finished / трамплин
 src/coro_layout.h         смещения и константы раскладки (ABI DIRECT)
 src/coro_ucontext.c       UCONTEXT-бэкенд
-tests/test_*.S + .expected ассемблерные тесты (эмулятор)
+tests/test_*.S + .expected [+ .exitcode]  ассемблерные тесты (эмулятор)
 tests/test_common.inc     макросы тестов
 tests/test_coro.c + .expected C-тест (любой бэкенд)
 tools/qemu-e2k-user-hwstacks.patch

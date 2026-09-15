@@ -17,17 +17,33 @@
 #define CTX_RET		0x40
 #define CTX_ENTRY	0x48
 #define CTX_FLAGS	0x50
-#define CTX_RESERVED	0x58
-#define CORO_CTX_SIZE	0x60
+#define CTX_AREA	0x58
+#define CTX_SIZE	0x60
+#define CTX_ATTR_FLAGS	0x68
+#define CTX_PS_SIZE	0x70
+#define CTX_PCS_SIZE	0x78
+#define CORO_CTX_SIZE	0x80
 
 #define CORO_FLAG_FINISHED	0x1
 
+/* атрибуты coro_init_ex */
+#define CORO_ATTR_GUARD		0x1
+#define ATTR_PS_SIZE	0x00
+#define ATTR_PCS_SIZE	0x08
+#define ATTR_FLAGS	0x10
+
 /* раскладка области стеков */
 #define CORO_AREA_ALIGN	0x1000
-#define CORO_PS_SIZE	0x4000		/* стек процедур: 16 КиБ */
-#define CORO_PCS_SIZE	0x1000		/* стек цепочек: 4 КиБ = 128 вложенных вызовов */
+#define CORO_PS_SIZE	0x4000		/* стек процедур по умолчанию: 16 КиБ */
+#define CORO_PCS_SIZE	0x1000		/* стек цепочек по умолчанию: 4 КиБ = 128 вложенных вызовов */
 #define CORO_MIN_DATA	0x1000
+#define CORO_GUARD_SIZE	0x1000		/* guard-страница (3 шт. при CORO_ATTR_GUARD) */
 #define CORO_MIN_AREA	(CORO_PS_SIZE + CORO_PCS_SIZE + CORO_MIN_DATA)
+
+/* системные вызовы Linux/e2k, нужные для guard-страниц */
+#define SYS_mprotect	125
+#define PROT_NONE	0x0
+#define PROT_RW		0x3
 #define BOOT_SIZE	0x20		/* вершина стека данных: own_ctx + резерв */
 
 /* chain-запись (CR) */

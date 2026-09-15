@@ -37,34 +37,66 @@ typedef struct coro_ctx {
 	void *arg;
 	struct coro_ctx *ret;
 	uint64_t flags;
+	void *area;
+	size_t size;
+	size_t guard;		/* фактический размер guard-страницы (страница ОС) */
+	unsigned attr_flags;
 } coro_ctx_t;
 
 #define CORO_AREA_ALIGN	16
+#define CORO_GUARD_SIZE	0x1000		/* минимум; с CORO_ATTR_GUARD берётся страница ОС, area выравнивается на неё */
 #define CORO_MIN_AREA	(64 * 1024)
 
 #else /* DIRECT */
 
 /* Раскладка полей — см. src/coro_layout.h; отсюда виден только размер. */
 typedef struct coro_ctx {
-	uint64_t raw[12];
+	uint64_t raw[16];
 } __attribute__((aligned(16))) coro_ctx_t;
 
 #define CORO_AREA_ALIGN	0x1000
-#define CORO_PS_SIZE	0x4000
-#define CORO_PCS_SIZE	0x1000
+#define CORO_PS_SIZE	0x4000		/* стек процедур по умолчанию */
+#define CORO_PCS_SIZE	0x1000		/* стек цепочек по умолчанию (~128 вложенных вызовов) */
+#define CORO_GUARD_SIZE	0x1000
+/* минимум для размеров по умолчанию без guard; с attr считайте:
+ * ps_size + pcs_size + 0x1000 (+ 3*CORO_GUARD_SIZE при CORO_ATTR_GUARD) */
 #define CORO_MIN_AREA	(CORO_PS_SIZE + CORO_PCS_SIZE + 0x1000)
 
 #endif
 
 #define CORO_FLAG_FINISHED	0x1u
 
+/* Атрибуты coro_init_ex. Нулевое поле — значение по умолчанию. */
+typedef struct coro_attr {
+	uint64_t ps_size;	/* DIRECT: стек процедур, кратен 0x1000; UCONTEXT: игнорируется */
+	uint64_t pcs_size;	/* DIRECT: стек цепочек, кратен 0x1000; UCONTEXT: игнорируется */
+	uint64_t flags;		/* CORO_ATTR_* */
+} coro_attr_t;
+
+#define CORO_ATTR_GUARD		0x1u	/* guard-страницы PROT_NONE вокруг стеков (mprotect) */
+
 /*
  * Подготовить корутину. area/size: область стеков, выровненная на
- * CORO_AREA_ALIGN, size кратен CORO_AREA_ALIGN и не меньше CORO_MIN_AREA.
- * Возвращает 0, либо -1 при некорректных аргументах.
+ * CORO_AREA_ALIGN (на страницу при CORO_ATTR_GUARD), size кратен
+ * выравниванию и достаточен для стеков (+ guard-страницы).
+ * Возвращает 0, либо -1 (некорректные аргументы, недостаточный size,
+ * ошибка mprotect).
  */
+int coro_init_ex(coro_ctx_t *ctx, void *area, size_t size,
+		 void (*entry)(void *), void *arg, coro_ctx_t *ret_ctx,
+		 const coro_attr_t *attr);
+
+/* coro_init_ex с attr == NULL: размеры по умолчанию, без guard. */
 int coro_init(coro_ctx_t *ctx, void *area, size_t size,
 	      void (*entry)(void *), void *arg, coro_ctx_t *ret_ctx);
+
+/*
+ * Уничтожить корутину (завершённую или нет): снять guard-страницы, чтобы
+ * area можно было освободить или переиспользовать, и сделать ctx
+ * непригодным для coro_transfer. На e2k в UCONTEXT-бэкенде дополнительно
+ * освобождает ресурсы ядра (freecontext). Не вызывать из самой корутины.
+ */
+void coro_destroy(coro_ctx_t *ctx);
 
 /* Сохранить текущий контекст в *from и продолжить *to. */
 void coro_transfer(coro_ctx_t *from, coro_ctx_t *to);

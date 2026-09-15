@@ -15,7 +15,7 @@ CPP        ?= cpp
 CC         ?= cc
 BUILD      ?= build
 
-TESTS_EMU := basic finish stress nested frame init_errors
+TESTS_EMU := basic finish stress nested frame init_errors attrs guard_fault
 EMU_BINS  := $(addprefix $(BUILD)/emu/test_,$(TESTS_EMU))
 
 .PHONY: all check check-emu check-host clean
@@ -44,8 +44,9 @@ $(BUILD)/emu:
 check-emu: $(EMU_BINS)
 	@fail=0; for t in $(TESTS_EMU); do \
 	  exp=tests/test_$$t.expected; out=$(BUILD)/emu/test_$$t.out; \
-	  $(QEMU_E2K) $(BUILD)/emu/test_$$t > $$out 2>&1; rc=$$?; \
-	  if [ $$rc -eq 0 ] && diff -u $$exp $$out > $$out.diff; then echo "PASS test_$$t"; \
+	  want=0; [ -f tests/test_$$t.exitcode ] && want=$$(cat tests/test_$$t.exitcode); \
+	  $(QEMU_E2K) $(BUILD)/emu/test_$$t > $$out 2>$$out.err; rc=$$?; \
+	  if [ $$rc -eq $$want ] && diff -u $$exp $$out > $$out.diff; then echo "PASS test_$$t"; \
 	  else echo "FAIL test_$$t (exit=$$rc)"; cat $$out.diff; tail -5 $$out; fail=1; fi; \
 	done; exit $$fail
 
